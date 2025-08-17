@@ -224,7 +224,7 @@ def main():
         # First try: ISO dates + integer bitmask dayOfWeek (then other variants)
         for dv in dayofweek_candidates():
             payload = dict(core); payload.update(iso_dates); payload["dayOfWeek"] = dv
-            ok, data, _ = post_api_soft(op_path, payload, expect_json=True)
+            ok, data, _ = (True, {"dry_run": True}, 200) if DRY_RUN else post_api_soft(op_path, payload, expect_json=True)
             if ok:
                 success = True; break
             last_err = data
@@ -236,7 +236,7 @@ def main():
         if not success:
             for dv in dayofweek_candidates():
                 payload = dict(core); payload.update(epoch_dates); payload["dayOfWeek"] = dv
-                ok, data, _ = post_api_soft(op_path, payload, expect_json=True)
+                ok, data, _ = (True, {"dry_run": True}, 200) if DRY_RUN else post_api_soft(op_path, payload, expect_json=True)
                 if ok:
                     success = True; break
                 last_err = data
@@ -246,10 +246,10 @@ def main():
 
         if existing:
             updated += 1
-            print(f"[update] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+            print(("[dry-run] " if DRY_RUN else "") + f"[update] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
         else:
             created += 1
-            print(f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+            print(("[dry-run] " if DRY_RUN else "") + f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
 
     Path("ads_created.json").write_text(
         json.dumps({"created": created, "updated": updated}, ensure_ascii=False, indent=2),

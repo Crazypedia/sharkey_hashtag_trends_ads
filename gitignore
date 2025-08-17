@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env
+
+# Generated artifacts
+ads_*.json
+*_trends*.json
+selected_tags.txt
+ads_dedupe_index.json
+
+# OS
+.DS_Store
+Thumbs.db

@@ -19,6 +19,8 @@ Tools to surface **bubble-wide trending tags** and turn them into **Sharkey/Miss
 
 ## Quick start
 
+> Tested with **Python 3.10+**. Earlier versions may work but aren’t supported here.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -49,7 +51,9 @@ cp .env.example .env
 
 4) **Create/Update ads** (writes `ads_created.json`):
    ```bash
-   python3 _3_ad_stage_create_ad.py
+   DRY_RUN=1 python3 _3_ad_stage_create_ad.py  # preview payloads only
+# or
+python3 _3_ad_stage_create_ad.py
    ```
 
 5) **(Optional) Clean the Ads folder** (for fresh runs):
@@ -178,6 +182,18 @@ Permissions the token needs (typical for Sharkey/Misskey forks):
 
 ---
 
+
+---
+
+## Admin considerations
+
+- **Attribution & provenance:** Images are sourced from public posts on other servers. Consider adding attribution (origin domain + post URL) to the ad memo or Drive file description if your policies require it.
+- **NSFW is best-effort:** The filters avoid obvious NSFW via content warnings, tags, and common terms. They are not perfect. Review before publishing in sensitive contexts.
+- **Rate limits & neighborly use:** Add small delays between requests if you expand your bubble; some servers rate limit aggressively.
+- **Timezones:** `startsAt`/`expiresAt` are sent in UTC; your UI may show local time.
+- **Production hygiene:** Prefer updating/rotating ads over deleting Drive media. Deleting files breaks ads that reference them.
+
+
 ## Troubleshooting
 
 - `INVALID_PARAM … must have required property 'place'`  
@@ -202,3 +218,18 @@ If you still get a 400, copy the exact response and compare to the payload in `_
 ## License / Credit
 
 This repository contains scripts authored with the assistance of AI. You are responsible for reviewing and operating them within your server’s policies and applicable laws.
+
+
+\1
+> **⚠️ Important production warning**  
+> Deleting images from Drive will break existing advertisements that reference those files.  
+> Use the cleaner only in test/dev runs. In production, prefer rotating ads (update dates) instead of deleting media.
+
+---
+
+## Developer experience
+
+- **Makefile:** `make install`, `make run-trends`, `make run-uploads`, `make run-ads`, `make clean-ads`.
+- **Pinned deps:** See `requirements.txt` for exact versions.
+- **.gitignore:** Excludes secrets and generated artifacts by default.
+- **Contributing:** If your fork expects different ad field names or types, open an issue with a sample of the 400 error JSON and the payload that works on your instance so we can add a shim.
