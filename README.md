@@ -39,29 +39,29 @@ cp .env.example .env
 
 2) **Aggregate trends & choose tags** (writes `bubble_trends.json` + `selected_tags.txt`):
 ```bash
-python3 _1_bubble_trends.py --select 10
+python -m sharkey_ads.bubble_trends --select 10
 # Or pick interactively:
-python3 _1_bubble_trends.py --interactive
+python -m sharkey_ads.bubble_trends --interactive
 ```
 
 3) **Fetch images & upload to Drive › Advertisements** (writes `ads_uploads_manifest.json`):
 ```bash
-python3 _2_ads_stage_uploads.py
+python -m sharkey_ads.ads_stage_uploads
 ```
 
 4) **Create/Update ads** (writes `ads_created.json`):
 
 ```bash
 # Preview (no writes)
-DRY_RUN=1 python3 _3_ad_stage_create_ad.py
+DRY_RUN=1 python -m sharkey_ads.ad_stage_create_ad
 
 # Create/update for real
-python3 _3_ad_stage_create_ad.py
+python -m sharkey_ads.ad_stage_create_ad
 ```
 
 5) **(Optional) Clean the Ads folder** (for fresh test runs):
 ```bash
-python3 clean_ads_folder.py --yes
+python -m sharkey_ads.clean_ads_folder --yes
 ```
 > **⚠️ Production warning:** Deleting images from Drive will **break existing advertisements** that reference those files. Use the cleaner only in test/dev runs. In production, prefer rotating ads (update dates) instead of deleting media.
 
@@ -69,7 +69,7 @@ python3 clean_ads_folder.py --yes
 
 ## Scripts & switches
 
-### 1) `_1_bubble_trends.py`
+### 1) `bubble_trends`
 Merges trending tags across your bubble and lets you pick a subset.
 
 **CLI**
@@ -84,7 +84,7 @@ Merges trending tags across your bubble and lets you pick a subset.
 
 ---
 
-### 2) `_2_ads_stage_uploads.py`
+### 2) `ads_stage_uploads`
 Finds a good post with media for each selected tag, filters sensitive content, dedupes by SHA‑256, and uploads the file to **Drive › Advertisements**.
 
 **Inputs**
@@ -108,7 +108,7 @@ Finds a good post with media for each selected tag, filters sensitive content, d
 
 ---
 
-### 3) `_3_ad_stage_create_ad.py`
+### 3) `ad_stage_create_ad`
 Creates/updates one Advertisement per tag, linking to your local tag page. Adapts to schema differences across forks.
 
 - Sends: `title`, `memo`, `imageUrl`, `url`, `place`, `priority` *(string)*.

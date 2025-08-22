@@ -10,15 +10,15 @@ install: venv
 	$(PIP) install -r requirements.txt
 
 run-trends:
-	$(PY) _1_bubble_trends.py --select 10
+	$(PY) -m sharkey_ads.bubble_trends --select 10
 
 run-uploads:
-	$(PY) _2_ads_stage_uploads.py
+	$(PY) -m sharkey_ads.ads_stage_uploads
 
 run-ads:
 	# Set DRY_RUN=1 to preview payloads without creating/updating
 	DRY_RUN?=0
-	DRY_RUN=$(DRY_RUN) $(PY) _3_ad_stage_create_ad.py
+	DRY_RUN=$(DRY_RUN) $(PY) -m sharkey_ads.ad_stage_create_ad
 
 clean-ads:
-	$(PY) clean_ads_folder.py --yes
+	$(PY) -m sharkey_ads.clean_ads_folder --yes
