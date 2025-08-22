@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<div id="images" class="tabcontent">
+    <div class="frame form-frame">
+        <form method="post" action="/fetch">
+            <label>Stack:
+                <select name="stack">
+                    <option value="mastodon" {% if stack == 'mastodon' %}selected{% endif %}>Mastodon</option>
+                    <option value="misskey" {% if stack == 'misskey' %}selected{% endif %}>Misskey/Sharkey</option>
+                </select>
+            </label>
+            <label>Domain: <input type="text" name="domain" value="{{ domain or '' }}" /></label>
+            <label>Tag: <input type="text" name="tag" value="{{ tag or '' }}" /></label>
+            <label>Limit: <input type="number" name="limit" value="{{ limit or 40 }}" /></label>
+            <button type="submit">Fetch</button>
+        </form>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+    </div>
+    <div id="viewer" class="frame viewer">
+        <img id="viewer-img" src="" alt="" />
+        <p id="viewer-text"></p>
+    </div>
+    <div class="frame gallery">
+        {% for img in images %}
+        <div class="item">
+            <img src="{{ img.url }}" alt="{{ img.alt }}" />
+            <p>{{ img.alt }}</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+<div id="settings" class="tabcontent">
+    <p>Settings placeholder for future expansion.</p>
+</div>
+{% endblock %}
