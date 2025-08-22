@@ -3,7 +3,10 @@ body { font-family: sans-serif; margin: 0; padding: 0; }
 .tablink { background: #555; border: none; color: white; padding: 10px 20px; cursor: pointer; float: left; }
 .tablink.active { background: #777; }
 .tabcontent { display: none; padding: 20px; }
+.frame { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
 .gallery { display: flex; flex-wrap: wrap; gap: 10px; }
-.gallery .item { width: 200px; }
+.gallery .item { width: 200px; cursor: pointer; }
 .gallery img { width: 100%; height: auto; }
+.viewer { display: none; text-align: center; }
+.viewer img { max-width: 100%; height: auto; }
 .error { color: red; margin-top: 10px; }
