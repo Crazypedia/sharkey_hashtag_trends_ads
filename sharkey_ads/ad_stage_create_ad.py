@@ -1,4 +1,4 @@
-# _3_ad_stage_create_ad.py
+# ad_stage_create_ad.py
 # Create/update one Advertisement per selected tag using Drive images from ads_uploads_manifest.json.
 # - Handles schema quirks across Sharkey/Misskey forks (place, startsAt/expiresAt, dayOfWeek, ratio int, priority string)
 # - Supports DRY_RUN=1 to preview payloads without modifying the server.
@@ -10,8 +10,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-# Load .env sitting next to this script
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+# Load .env from project root
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # ===== Config / ENV =====
 SHARKEY_BASE  = (os.getenv("SHARKEY_BASE") or "").rstrip("/")

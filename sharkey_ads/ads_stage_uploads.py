@@ -8,8 +8,8 @@ from io import BytesIO
 import requests
 from dotenv import load_dotenv
 
-# --- load .env ---
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+# --- load .env from project root ---
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # -------- config via env --------
 SHARKEY_BASE = os.getenv("SHARKEY_BASE", "https://mypocketpals.online").rstrip("/")

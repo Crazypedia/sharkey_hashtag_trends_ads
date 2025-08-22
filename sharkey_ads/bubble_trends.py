@@ -2,8 +2,8 @@
 # Aggregate trending hashtags across your bubble servers and pick a subset for the next step.
 # Usage:
 #   1) Create bubble_domains.txt with one domain per line (e.g. mastodon.social, misskey.io)
-#   2) python3 bubble_trends.py --select 12
-#      or: python3 bubble_trends.py --interactive
+#   2) python -m sharkey_ads.bubble_trends --select 12
+#      or: python -m sharkey_ads.bubble_trends --interactive
 
 import argparse
 import json, os, sys, time

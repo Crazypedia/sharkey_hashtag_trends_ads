@@ -5,8 +5,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-# Load .env from this project folder
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
+# Load .env from project root
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 SHARKEY_BASE = (os.getenv("SHARKEY_BASE") or "").rstrip("/")
 SHARKEY_TOKEN = (os.getenv("SHARKEY_TOKEN") or "").strip()
