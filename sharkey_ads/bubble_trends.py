@@ -9,10 +9,7 @@ import argparse
 import json, os, sys, time
 from collections import defaultdict
 
-import requests
-
-TIMEOUT = 15
-HEADERS = {"User-Agent": "BubbleTrends/1.1 (+https://mypocketpals.online)"}
+from .apis import mastodon as mastodon_api, misskey as misskey_api
 
 def load_domains(path="bubble_domains.txt"):
     if not os.path.exists(path):
@@ -26,71 +23,12 @@ def load_domains(path="bubble_domains.txt"):
                 out.append(d)
     return out
 
-def get_json(url, method="GET", json_body=None):
-    try:
-        if method == "GET":
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        else:
-            r = requests.post(url, headers={"Content-Type":"application/json", **HEADERS},
-                              json=json_body or {}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"[warn] {method} {url} failed: {e}")
-        return None
-
-def fetch_mastodon_trends(domain, limit=20):
-    # https://docs.joinmastodon.org/methods/trends/
-    url = f"https://{domain}/api/v1/trends/tags?limit={limit}"
-    data = get_json(url, "GET")
-    tags = []
-    if isinstance(data, list):
-        for item in data:
-            name = (item.get("name") or "").strip()
-            score = 0
-            for h in (item.get("history") or []):
-                try:
-                    score += int(h.get("uses", 0))
-                except Exception:
-                    pass
-            if not score:
-                score = 1
-            if name:
-                tags.append((name, score))
-    return tags
-
-def fetch_misskey_trends(domain, limit=20):
-    # Misskey/Sharkey: /api/hashtags/trend (GET or POST JSON)
-    base = f"https://{domain}/api/hashtags/trend"
-    data = get_json(base, "GET") or get_json(base, "POST", {"limit": limit})
-    tags = []
-    if isinstance(data, list):
-        for item in data:
-            if isinstance(item, str):
-                tags.append((item, 1))
-            elif isinstance(item, dict):
-                name = item.get("tag") or item.get("name") or item.get("hashtag")
-                score = 0
-                if "count" in item and isinstance(item["count"], int):
-                    score = item["count"]
-                elif "chart" in item and isinstance(item["chart"], list):
-                    for v in item["chart"]:
-                        try:
-                            score += int(v)
-                        except Exception:
-                            pass
-                if not score:
-                    score = 1
-                if name:
-                    tags.append((name, score))
-    return tags
-
 def guess_stack(domain):
     # Probe Mastodon first (public), then Misskey.
-    m = fetch_mastodon_trends(domain, limit=1)
+    m = mastodon_api.get_trends(domain, limit=1)
     if m:
         return "mastodon"
-    ms = fetch_misskey_trends(domain, limit=1)
+    ms = misskey_api.get_trends(domain, limit=1)
     if ms:
         return "misskey"
     return "unknown"
@@ -137,9 +75,9 @@ def main():
         print(f"[info] {d}")
         stack = guess_stack(d)
         if stack == "mastodon":
-            tags = fetch_mastodon_trends(d, limit=args.limit_per_domain)
+            tags = mastodon_api.get_trends(d, limit=args.limit_per_domain)
         elif stack == "misskey":
-            tags = fetch_misskey_trends(d, limit=args.limit_per_domain)
+            tags = misskey_api.get_trends(d, limit=args.limit_per_domain)
         else:
             print(f"[warn] {d}: could not detect a supported API; skipping.")
             tags = []
