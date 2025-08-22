@@ -184,9 +184,9 @@ def main():
         die("Set SHARKEY_BASE and SHARKEY_TOKEN in .env")
 
     tags = [t.lstrip("#").lower() for t in read_lines("selected_tags.txt")]
-    domains = [d.lower() for d in read_lines("bubble_domains.txt")]
+    domains = [d.lower() for d in read_lines("trendy_domains.txt")]
     if not tags: die("selected_tags.txt is empty")
-    if not domains: die("bubble_domains.txt is empty")
+    if not domains: die("trendy_domains.txt is empty")
 
     # Prove Drive works
     _ = mk_api("drive/folders", {})

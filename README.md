@@ -30,8 +30,8 @@ cp .env.example .env
 # edit .env and set SHARKEY_BASE + SHARKEY_TOKEN
 ```
 
-1) **Choose your bubble** (trusted public servers).  
-   Edit `bubble_domains.txt` (one per line). A minimal default is included:
+1) **Choose your trendy domains** (trusted public servers).
+   Edit `trendy_domains.txt` (one per line). A minimal default is included:
    ```
    mastodon.social
    mastodon.art
@@ -73,7 +73,7 @@ python -m sharkey_ads.clean_ads_folder --yes
 Merges trending tags across your bubble and lets you pick a subset.
 
 **CLI**
-- `--domains-file PATH`  (default: `bubble_domains.txt`)  
+- `--domains-file PATH`  (default: `trendy_domains.txt`)
 - `--limit-per-domain N` (default: `40`)  
 - `--select N`           (default: `10`) — choose top N automatically  
 - `--interactive`        — choose by index ranges (e.g., `1-5,8,12`)
@@ -89,7 +89,7 @@ Finds a good post with media for each selected tag, filters sensitive content, d
 
 **Inputs**
 - `selected_tags.txt` — from stage 1
-- `bubble_domains.txt` — the bubble
+- `trendy_domains.txt` — the domain list
 
 **Environment (.env)**
 - `SHARKEY_BASE` — e.g., `https://your.instance`

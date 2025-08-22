@@ -1,7 +1,7 @@
 # bubble_trends.py
 # Aggregate trending hashtags across your bubble servers and pick a subset for the next step.
 # Usage:
-#   1) Create bubble_domains.txt with one domain per line (e.g. mastodon.social, misskey.io)
+#   1) Create trendy_domains.txt with one domain per line (e.g. mastodon.social, misskey.io)
 #   2) python -m sharkey_ads.bubble_trends --select 12
 #      or: python -m sharkey_ads.bubble_trends --interactive
 
@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .apis import mastodon as mastodon_api, misskey as misskey_api
 
-def load_domains(path="bubble_domains.txt"):
+def load_domains(path="trendy_domains.txt"):
     if not os.path.exists(path):
         print(f"[error] {path} not found. Create it with one domain per line.", file=sys.stderr)
         sys.exit(1)
@@ -79,7 +79,7 @@ def fetch_domain_tags(domain, limit):
 
 def main():
     ap = argparse.ArgumentParser(description="Merge trending tags across bubble servers and select a subset.")
-    ap.add_argument("--domains-file", default="bubble_domains.txt", help="Path to bubble domains list")
+    ap.add_argument("--domains-file", default="trendy_domains.txt", help="Path to trendy domains list")
     ap.add_argument("--limit-per-domain", type=int, default=40, help="Fetch up to this many tags per domain")
     ap.add_argument("--select", type=int, default=10, help="Automatically pick top N merged tags")
     ap.add_argument("--interactive", action="store_true", help="Interactively choose tags by index ranges")
