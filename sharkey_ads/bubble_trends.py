@@ -8,6 +8,7 @@
 import argparse
 import json, os, sys, time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .apis import mastodon as mastodon_api, misskey as misskey_api
 
@@ -59,6 +60,23 @@ def parse_selection_ranges(spec: str, max_index: int):
                 continue
     return sorted(chosen)
 
+def fetch_domain_tags(domain, limit):
+    """Detect server type and fetch trending tags for a single domain."""
+    try:
+        print(f"[info] {domain}")
+        stack = guess_stack(domain)
+        if stack == "mastodon":
+            tags = mastodon_api.get_trends(domain, limit=limit)
+        elif stack == "misskey":
+            tags = misskey_api.get_trends(domain, limit=limit)
+        else:
+            print(f"[warn] {domain}: could not detect a supported API; skipping.")
+            tags = []
+    except Exception as e:
+        print(f"[error] {domain}: {e}")
+        tags = []
+    return domain, tags
+
 def main():
     ap = argparse.ArgumentParser(description="Merge trending tags across bubble servers and select a subset.")
     ap.add_argument("--domains-file", default="bubble_domains.txt", help="Path to bubble domains list")
@@ -71,20 +89,14 @@ def main():
     aggregate = defaultdict(int)
     per_domain = {}
 
-    for d in domains:
-        print(f"[info] {d}")
-        stack = guess_stack(d)
-        if stack == "mastodon":
-            tags = mastodon_api.get_trends(d, limit=args.limit_per_domain)
-        elif stack == "misskey":
-            tags = misskey_api.get_trends(d, limit=args.limit_per_domain)
-        else:
-            print(f"[warn] {d}: could not detect a supported API; skipping.")
-            tags = []
-        per_domain[d] = tags
-        for name, score in tags:
-            norm = name.lstrip("#").lower()
-            aggregate[norm] += int(score)
+    with ThreadPoolExecutor(max_workers=min(8, len(domains) or 1)) as exe:
+        futures = [exe.submit(fetch_domain_tags, d, args.limit_per_domain) for d in domains]
+        for fut in as_completed(futures):
+            d, tags = fut.result()
+            per_domain[d] = tags
+            for name, score in tags:
+                norm = name.lstrip("#").lower()
+                aggregate[norm] += int(score)
 
     merged = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
 

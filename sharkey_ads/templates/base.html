@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Sharkey Ads Admin</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/tabs.js" defer></script>
+</head>
+<body>
+    <div class="tabs">
+        <button class="tablink" onclick="openTab(event, 'images')" id="defaultTab">Images</button>
+        <button class="tablink" onclick="openTab(event, 'settings')">Settings</button>
+    </div>
+    {% block content %}{% endblock %}
+    <script>document.getElementById("defaultTab").click();</script>
+</body>
+</html>
