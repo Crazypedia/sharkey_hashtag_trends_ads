@@ -1,12 +1,13 @@
 # ads_stage_uploads.py
 import os, sys, re, json, mimetypes, hashlib
 from datetime import date
-from urllib.parse import urlparse, quote
+from urllib.parse import urlparse
 from pathlib import Path
 from io import BytesIO
 
 import requests
 from dotenv import load_dotenv
+from .apis import mastodon as mastodon_api, misskey as misskey_api
 
 # --- load .env from project root ---
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -103,40 +104,10 @@ def guess_ext_from_bytes_or_url(content_type, url):
     return ".jpg"
 
 # ---------- fetch from bubble servers ----------
-def get_json(url, params=None):
-    try:
-        r = SESSION.get(url, params=params or {}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
-    except (requests.RequestException, json.JSONDecodeError):
-        return None
-
-def fetch_masto_tag_timeline(domain, tag, limit=40):
-    safe_tag = quote(tag.lstrip("#"), safe="")
-    return get_json(f"https://{domain}/api/v1/timelines/tag/{safe_tag}", params={"limit": limit}) or []
-
-def fetch_misskey_tag_timeline(domain, tag, limit=40):
-    base = f"https://{domain}/api"
-    try:
-        r = SESSION.post(f"{base}/notes/search-by-tag",
-                         json={"tag": tag, "limit": limit}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return r.json() or []
-    except Exception:
-        pass
-    try:
-        r = SESSION.post(f"{base}/notes/search",
-                         json={"query": f"#{tag}", "limit": limit}, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return r.json() or []
-    except Exception:
-        pass
-    return []
-
 def detect_stack(domain):
-    if isinstance(get_json(f"https://{domain}/api/v1/trends/tags", params={"limit": 1}), list):
+    if mastodon_api.get_trends(domain, limit=1):
         return "mastodon"
-    if isinstance(get_json(f"https://{domain}/api/hashtags/trend"), list):
+    if misskey_api.get_trends(domain, limit=1):
         return "misskey"
     return "unknown"
 
@@ -147,20 +118,6 @@ def masto_status_key(s, domain):
 def misskey_note_key(n, domain):
     return n.get("uri") or n.get("url") or f"{domain}#misskey#{n.get('id')}"
 
-def pick_image_from_masto_status(s):
-    for a in (s.get("media_attachments") or []):
-        if (a.get("type") or "").lower() == "image":
-            return a.get("remote_url") or a.get("url") or a.get("preview_url")
-    return None
-
-def pick_image_from_misskey_note(n):
-    for f in (n.get("files") or []):
-        if f.get("isSensitive") is True: 
-            continue
-        ctype = (f.get("type") or f.get("contentType") or "").lower()
-        if ctype.startswith("image/"):
-            return f.get("url") or f.get("thumbnailUrl")
-    return None
 
 def masto_score(s):
     fav = int(s.get("favourites_count", 0))
@@ -249,14 +206,16 @@ def main():
             stack = detect_stack(domain)
             print(f"  - probing {domain} ({stack}) …")
             if stack == "mastodon":
-                for s in fetch_masto_tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not s or not is_safe_masto(s): continue
-                    img = pick_image_from_masto_status(s)
-                    if not img: continue
+                for s in mastodon_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                    if not s or not is_safe_masto(s):
+                        continue
+                    img, _alt = mastodon_api.pick_image(s)
+                    if not img:
+                        continue
                     key = masto_status_key(s, domain)
                     score = masto_score(s)
                     origin = urlparse(s.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances":0, "best_score":-1, "image_url":img, "origin_domain":origin})
+                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
                     e["appearances"] += 1
                     if score > e["best_score"]:
                         e["best_score"] = score
@@ -264,14 +223,16 @@ def main():
                         e["origin_domain"] = origin
                     posts[key] = e
             elif stack == "misskey":
-                for n in fetch_misskey_tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not n or not is_safe_misskey(n): continue
-                    img = pick_image_from_misskey_note(n)
-                    if not img: continue
+                for n in misskey_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                    if not n or not is_safe_misskey(n):
+                        continue
+                    img, _alt = misskey_api.pick_image(n)
+                    if not img:
+                        continue
                     key = misskey_note_key(n, domain)
                     score = misskey_score(n)
                     origin = urlparse(n.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances":0, "best_score":-1, "image_url":img, "origin_domain":origin})
+                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
                     e["appearances"] += 1
                     if score > e["best_score"]:
                         e["best_score"] = score
