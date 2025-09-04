@@ -1,24 +1,29 @@
-import requests
+from mastodon import Mastodon
 
 TIMEOUT = 15
-HEADERS = {"User-Agent": "BubbleTrends/1.1 (+https://mypocketpals.online)"}
+USER_AGENT = "BubbleTrends/1.1 (+https://mypocketpals.online)"
 
-def _get_json(url, method="GET", json_body=None):
+def _client(domain):
+    """Return a Mastodon API client for the given Misskey/Sharkey domain."""
+    return Mastodon(api_base_url=f"https://{domain}",
+                    request_timeout=TIMEOUT,
+                    user_agent=USER_AGENT)
+
+def _api(client, method, endpoint, params=None, json=False):
+    """Helper to perform API requests via Mastodon.py."""
     try:
-        if method == "GET":
-            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
-        else:
-            r = requests.post(url, headers={"Content-Type":"application/json", **HEADERS},
-                              json=json_body or {}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
+        return client._Mastodon__api_request(method, endpoint,
+                                             params=params or {},
+                                             use_json=json)
     except Exception:
         return None
 
 def get_trends(domain, limit=20):
     """Return [(tag, score), ...] for Misskey/Sharkey instance."""
-    base = f"https://{domain}/api/hashtags/trend"
-    data = _get_json(base, "GET") or _get_json(base, "POST", {"limit": limit})
+    client = _client(domain)
+    data = _api(client, "GET", "/api/hashtags/trend") or \
+           _api(client, "POST", "/api/hashtags/trend",
+                params={"limit": limit}, json=True)
     tags = []
     if isinstance(data, list):
         for item in data:
@@ -43,24 +48,14 @@ def get_trends(domain, limit=20):
 
 def tag_timeline(domain, tag, limit=40):
     """Return list of notes for a hashtag."""
-    base = f"https://{domain}/api"
-    try:
-        r = requests.post(f"{base}/notes/search-by-tag",
-                         json={"tag": tag, "limit": limit},
-                         headers=HEADERS, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return r.json() or []
-    except Exception:
-        pass
-    try:
-        r = requests.post(f"{base}/notes/search",
-                         json={"query": f"#{tag}", "limit": limit},
-                         headers=HEADERS, timeout=TIMEOUT)
-        if r.status_code == 200:
-            return r.json() or []
-    except Exception:
-        pass
-    return []
+    client = _client(domain)
+    base = "/api"
+    data = _api(client, "POST", f"{base}/notes/search-by-tag",
+                params={"tag": tag, "limit": limit}, json=True)
+    if data is None:
+        data = _api(client, "POST", f"{base}/notes/search",
+                    params={"query": f"#{tag}", "limit": limit}, json=True)
+    return data or []
 
 def pick_image(post):
     """Return (url, alt_text) for first safe image file in note."""

@@ -1,21 +1,22 @@
-import requests
+from mastodon import Mastodon
 from urllib.parse import quote
 
 TIMEOUT = 15
-HEADERS = {"User-Agent": "BubbleTrends/1.1 (+https://mypocketpals.online)"}
+USER_AGENT = "BubbleTrends/1.1 (+https://mypocketpals.online)"
 
-def _get_json(url, params=None):
-    try:
-        r = requests.get(url, headers=HEADERS, params=params or {}, timeout=TIMEOUT)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+def _client(domain):
+    """Return a Mastodon API client for the given domain."""
+    return Mastodon(api_base_url=f"https://{domain}",
+                    request_timeout=TIMEOUT,
+                    user_agent=USER_AGENT)
 
 def get_trends(domain, limit=20):
     """Return [(tag, score), ...] for Mastodon instance."""
-    url = f"https://{domain}/api/v1/trends/tags"
-    data = _get_json(url, params={"limit": limit})
+    masto = _client(domain)
+    try:
+        data = masto.trending_tags(limit=limit)
+    except Exception:
+        data = []
     tags = []
     if isinstance(data, list):
         for item in data:
@@ -35,8 +36,11 @@ def get_trends(domain, limit=20):
 def tag_timeline(domain, tag, limit=40):
     """Return list of statuses for a hashtag."""
     safe = quote(tag.lstrip("#"), safe="")
-    url = f"https://{domain}/api/v1/timelines/tag/{safe}"
-    return _get_json(url, params={"limit": limit}) or []
+    masto = _client(domain)
+    try:
+        return masto.timeline_hashtag(safe, limit=limit) or []
+    except Exception:
+        return []
 
 def pick_image(post):
     """Return (url, alt_text) for first image attachment in status."""
