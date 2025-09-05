@@ -20,7 +20,7 @@ jobs:
           python-version: '3.x'
       - run: pip install -r requirements.txt
       - run: pip install pytest
-      - run: pytest
+      - run: python -m pytest
 
   debug:
     if: ${{ github.event.inputs.debug_enabled == 'true' }}
