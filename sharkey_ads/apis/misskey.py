@@ -1,7 +1,7 @@
 from mastodon import Mastodon
 
 TIMEOUT = 15
-USER_AGENT = "BubbleTrends/1.1 (+https://mypocketpals.online)"
+USER_AGENT = "SeedTrends/1.1 (+https://mypocketpals.online)"
 
 def _client(domain):
     """Return a Mastodon API client for the given Misskey/Sharkey domain."""

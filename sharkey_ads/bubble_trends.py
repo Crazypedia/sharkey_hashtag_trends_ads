@@ -1,5 +1,5 @@
 # bubble_trends.py
-# Aggregate trending hashtags across your bubble servers and pick a subset for the next step.
+# Aggregate trending hashtags across your seed list servers and pick a subset for the next step.
 # Usage:
 #   1) Create trendy_domains.txt with one domain per line (e.g. mastodon.social, misskey.io)
 #   2) python -m sharkey_ads.bubble_trends --select 12
@@ -78,7 +78,7 @@ def fetch_domain_tags(domain, limit):
     return domain, tags
 
 def main():
-    ap = argparse.ArgumentParser(description="Merge trending tags across bubble servers and select a subset.")
+    ap = argparse.ArgumentParser(description="Merge trending tags across seed list servers and select a subset.")
     ap.add_argument("--domains-file", default="trendy_domains.txt", help="Path to trendy domains list")
     ap.add_argument("--limit-per-domain", type=int, default=40, help="Fetch up to this many tags per domain")
     ap.add_argument("--select", type=int, default=10, help="Automatically pick top N merged tags")
@@ -101,7 +101,7 @@ def main():
     merged = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
 
     # Print a preview
-    print("\n=== Bubble-wide trending (merged) ===")
+    print("\n=== Seed list trending (merged) ===")
     for i, (tag, score) in enumerate(merged[:100], 1):
         print(f"{i:2}. #{tag}  — score {score}")
 

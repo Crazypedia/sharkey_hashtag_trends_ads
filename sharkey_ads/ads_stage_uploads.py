@@ -17,7 +17,7 @@ SHARKEY_BASE = os.getenv("SHARKEY_BASE", "https://mypocketpals.online").rstrip("
 SHARKEY_TOKEN = (os.getenv("SHARKEY_TOKEN") or "").strip()
 AD_FOLDER = os.getenv("AD_FOLDER", "Advertisements")
 STATUS_SCAN_LIMIT = int(os.getenv("STATUS_SCAN_LIMIT", "60"))
-USER_AGENT = os.getenv("USER_AGENT", "BubbleAdUploader/1.3 (+https://mypocketpals.online)")
+USER_AGENT = os.getenv("USER_AGENT", "SeedAdUploader/1.3 (+https://mypocketpals.online)")
 TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
 DEDUP_MODE = (os.getenv("DEDUP_MODE", "reuse") or "reuse").lower()  # reuse | rename
 
@@ -103,7 +103,7 @@ def guess_ext_from_bytes_or_url(content_type, url):
         return ext2
     return ".jpg"
 
-# ---------- fetch from bubble servers ----------
+# ---------- fetch from seed list servers ----------
 def detect_stack(domain):
     if mastodon_api.get_trends(domain, limit=1):
         return "mastodon"

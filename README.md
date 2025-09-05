@@ -1,10 +1,10 @@
 # sharkey_hashtag_trends_ads
 
-Surface **bubble-wide trending tags** and turn them into **Sharkey/Misskey advertisements** that link to your local tag pages.
+Surface **seed-list trending tags** and turn them into **Sharkey/Misskey advertisements** that link to your local tag pages.
 
 ## What it does
 
-- **Discover trending hashtags** across the servers you trust (your “bubble”).  
+- **Discover trending hashtags** across the servers you trust (your seed list).
 - For each tag you pick, **select a representative safe image** (consensus across servers first; otherwise the most‑engaged post).  
 - **Deduplicate** by SHA‑256 so the same image isn’t uploaded twice.  
 - **Upload** the image to your server’s **Drive › Advertisements** folder (creating it if missing).  
@@ -37,7 +37,7 @@ cp .env.example .env
    mastodon.art
    ```
 
-2) **Aggregate trends & choose tags** (writes `bubble_trends.json` + `selected_tags.txt`):
+2) **Aggregate trends from your seed list & choose tags** (writes `bubble_trends.json` + `selected_tags.txt`):
 ```bash
 python -m sharkey_ads.bubble_trends --select 10
 # Or pick interactively:
@@ -70,7 +70,7 @@ python -m sharkey_ads.clean_ads_folder --yes
 ## Scripts & switches
 
 ### 1) `bubble_trends`
-Merges trending tags across your bubble and lets you pick a subset.
+Merges trending tags across your seed list and lets you pick a subset.
 
 **CLI**
 - `--domains-file PATH`  (default: `trendy_domains.txt`)
@@ -170,7 +170,7 @@ SHARKEY_TOKEN=YOUR_ADMIN_API_TOKEN_HERE
 AD_FOLDER=Advertisements  # storage folder; created automatically if missing
 STATUS_SCAN_LIMIT=60
 HTTP_TIMEOUT=25
-USER_AGENT=BubbleAdUploader/1.3 (+https://your-domain)
+USER_AGENT=SeedAdUploader/1.3 (+https://your-domain)
 
 # Dedupe behaviour: reuse | rename
 DEDUP_MODE=reuse
@@ -202,7 +202,7 @@ Required token scopes (typical for Sharkey/Misskey forks):
 
 - **Attribution & provenance:** Images are sourced from public posts on other servers. Consider adding attribution (origin domain + post URL) to the ad memo or Drive file description if your policies require it.
 - **NSFW is best‑effort:** Filters avoid obvious NSFW via content warnings, tags, and common terms. They are not perfect. Review before publishing in sensitive contexts.
-- **Neighborly rate limits:** Add small delays between requests if you expand your bubble; some servers rate limit aggressively.
+- **Neighborly rate limits:** Add small delays between requests if you expand your seed list; some servers rate limit aggressively.
 - **Timezones:** `startsAt`/`expiresAt` are sent in UTC; your UI may show local time.
 - **Production hygiene:** Prefer updating/rotating ads over deleting Drive media. Deleting files breaks ads that reference them.
 
