@@ -9,6 +9,9 @@ venv:
 install: venv
 	$(PIP) install -r requirements.txt
 
+test: install
+	$(PY) -m pytest
+
 run-trends:
 	$(PY) -m sharkey_ads.bubble_trends --select 10
 
