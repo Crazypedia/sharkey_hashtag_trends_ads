@@ -13,10 +13,13 @@ test: install
 	$(PY) -m pytest
 
 run-trends:
-	$(PY) -m sharkey_ads.bubble_trends --select 10
+        $(PY) -m sharkey_ads.bubble_trends --select 10
+
+run-pipeline:
+        $(PY) -m sharkey_ads.pipeline
 
 run-uploads:
-	$(PY) -m sharkey_ads.ads_stage_uploads
+        $(PY) -m sharkey_ads.ads_stage_uploads
 
 run-ads:
 	# Set DRY_RUN=1 to preview payloads without creating/updating

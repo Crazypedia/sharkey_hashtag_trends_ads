@@ -30,6 +30,16 @@ cp .env.example .env
 # edit .env and set SHARKEY_BASE + SHARKEY_TOKEN
 ```
 
+**One-shot pipeline**
+
+```bash
+python -m sharkey_ads.pipeline
+```
+
+This interactive run lets you review your seed list, pick trending hashtags, upload images, and create ads in one go.
+
+**Manual stages**
+
 1) **Choose your trendy domains** (trusted public servers).
    Edit `trendy_domains.txt` (one per line). A minimal default is included:
    ```
