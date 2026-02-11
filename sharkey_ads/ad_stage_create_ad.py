@@ -180,10 +180,12 @@ def main():
 
     uploads_by_tag = newest_per_tag(uploads)
     created, updated = 0, 0
+    failed_tags = []
     now = datetime.utcnow()
     expires_dt = now + timedelta(days=AD_DURATION_DAYS)
 
     for tag, r in uploads_by_tag.items():
+      try:
         title = f"{TITLE_PREFIX}{tag} — featured"
         url = f"{SHARKEY_BASE}/tags/{tag}"
 
@@ -255,7 +257,9 @@ def main():
                 last_err = data
 
         if not success:
-            die(f"{op_path} failed: {last_err}")
+            print(f"  [error] #{tag}: {op_path} failed after all attempts: {last_err}")
+            failed_tags.append(tag)
+            continue
 
         if existing:
             updated += 1
@@ -264,11 +268,19 @@ def main():
             created += 1
             print(("[dry-run] " if DRY_RUN else "") + f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
 
+      except Exception as e:
+        print(f"  [error] #{tag}: unexpected failure: {e} — skipping")
+        failed_tags.append(tag)
+        continue
+
+    if failed_tags:
+        print(f"\n[warn] {len(failed_tags)} ad(s) failed: {', '.join(failed_tags)}")
+
     Path("ads_created.json").write_text(
-        json.dumps({"created": created, "updated": updated}, ensure_ascii=False, indent=2),
+        json.dumps({"created": created, "updated": updated, "failed": failed_tags}, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    print(f"\n[done] ads created={created}, updated={updated}. Wrote ads_created.json.")
+    print(f"\n[done] ads created={created}, updated={updated}, failed={len(failed_tags)}. Wrote ads_created.json.")
 
 if __name__ == "__main__":
     main()

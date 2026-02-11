@@ -1,5 +1,5 @@
 # ads_stage_uploads.py
-import os, sys, re, json, mimetypes, hashlib
+import os, sys, re, json, mimetypes, hashlib, time
 from datetime import date
 from urllib.parse import urlparse
 from pathlib import Path
@@ -20,6 +20,7 @@ STATUS_SCAN_LIMIT = int(os.getenv("STATUS_SCAN_LIMIT", "60"))
 USER_AGENT = os.getenv("USER_AGENT", "BubbleAdUploader/1.3 (+https://mypocketpals.online)")
 TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
 DEDUP_MODE = (os.getenv("DEDUP_MODE", "reuse") or "reuse").lower()  # reuse | rename
+DOMAIN_PROBE_DELAY = float(os.getenv("DOMAIN_PROBE_DELAY", "1.0"))  # seconds between domain probes
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
@@ -183,10 +184,11 @@ def main():
     if not SHARKEY_BASE or not SHARKEY_TOKEN:
         die("Set SHARKEY_BASE and SHARKEY_TOKEN in .env")
 
-    tags = [t.lstrip("#").lower() for t in read_lines("selected_tags.txt")]
-    domains = [d.lower() for d in read_lines("trendy_domains.txt")]
+    tags = list(dict.fromkeys(t.lstrip("#").lower() for t in read_lines("selected_tags.txt")))
+    domains = list(dict.fromkeys(d.lower() for d in read_lines("trendy_domains.txt")))
     if not tags: die("selected_tags.txt is empty")
     if not domains: die("trendy_domains.txt is empty")
+    print(f"[info] {len(tags)} unique tags, {len(domains)} unique domains")
 
     # Prove Drive works
     _ = mk_api("drive/folders", {})
@@ -195,52 +197,60 @@ def main():
     today = date.today().isoformat()
     idx = load_index()
     results = []
+    failed_tags = []
 
     for tag in tags:
+      try:
         print(f"\n[tag] #{tag}")
         safe_tag = sanitize_tag_for_filename(tag)
 
         # collect candidates across servers
         posts = {}  # key -> {appearances, best_score, image_url, origin_domain}
         for domain in domains:
-            stack = detect_stack(domain)
-            print(f"  - probing {domain} ({stack}) …")
-            if stack == "mastodon":
-                for s in mastodon_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not s or not is_safe_masto(s):
-                        continue
-                    img, _alt = mastodon_api.pick_image(s)
-                    if not img:
-                        continue
-                    key = masto_status_key(s, domain)
-                    score = masto_score(s)
-                    origin = urlparse(s.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
-                    e["appearances"] += 1
-                    if score > e["best_score"]:
-                        e["best_score"] = score
-                        e["image_url"] = img
-                        e["origin_domain"] = origin
-                    posts[key] = e
-            elif stack == "misskey":
-                for n in misskey_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not n or not is_safe_misskey(n):
-                        continue
-                    img, _alt = misskey_api.pick_image(n)
-                    if not img:
-                        continue
-                    key = misskey_note_key(n, domain)
-                    score = misskey_score(n)
-                    origin = urlparse(n.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
-                    e["appearances"] += 1
-                    if score > e["best_score"]:
-                        e["best_score"] = score
-                        e["image_url"] = img
-                        e["origin_domain"] = origin
-                    posts[key] = e
-            else:
-                print(f"    [skip] unknown stack")
+            try:
+                if DOMAIN_PROBE_DELAY > 0:
+                    time.sleep(DOMAIN_PROBE_DELAY)
+                stack = detect_stack(domain)
+                print(f"  - probing {domain} ({stack}) …")
+                if stack == "mastodon":
+                    for s in mastodon_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                        if not s or not is_safe_masto(s):
+                            continue
+                        img, _alt = mastodon_api.pick_image(s)
+                        if not img:
+                            continue
+                        key = masto_status_key(s, domain)
+                        score = masto_score(s)
+                        origin = urlparse(s.get("url") or "").netloc or domain
+                        e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
+                        e["appearances"] += 1
+                        if score > e["best_score"]:
+                            e["best_score"] = score
+                            e["image_url"] = img
+                            e["origin_domain"] = origin
+                        posts[key] = e
+                elif stack == "misskey":
+                    for n in misskey_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                        if not n or not is_safe_misskey(n):
+                            continue
+                        img, _alt = misskey_api.pick_image(n)
+                        if not img:
+                            continue
+                        key = misskey_note_key(n, domain)
+                        score = misskey_score(n)
+                        origin = urlparse(n.get("url") or "").netloc or domain
+                        e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
+                        e["appearances"] += 1
+                        if score > e["best_score"]:
+                            e["best_score"] = score
+                            e["image_url"] = img
+                            e["origin_domain"] = origin
+                        posts[key] = e
+                else:
+                    print(f"    [skip] unknown stack")
+            except Exception as e:
+                print(f"    [error] {domain}: {e} — skipping this domain for #{tag}")
+                continue
 
         if not posts:
             print(f"  [warn] no candidates found for #{tag}")
@@ -317,11 +327,19 @@ def main():
             print(f"    [warn] upload failed: {e}")
             continue
 
+      except Exception as e:
+        print(f"  [error] tag #{tag} failed unexpectedly: {e} — skipping")
+        failed_tags.append(tag)
+        continue
+
+    if failed_tags:
+        print(f"\n[warn] {len(failed_tags)} tag(s) failed: {', '.join(failed_tags)}")
+
     MANIFEST_PATH.write_text(
-        json.dumps({"generated_at": int(__import__('time').time()), "results": results}, ensure_ascii=False, indent=2),
+        json.dumps({"generated_at": int(time.time()), "results": results}, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    print("\n[done] wrote ads_uploads_manifest.json and updated ads_dedupe_index.json")
+    print(f"\n[done] wrote ads_uploads_manifest.json ({len(results)} tags ok, {len(failed_tags)} failed)")
 
 if __name__ == "__main__":
     main()

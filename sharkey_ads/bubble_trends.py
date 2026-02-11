@@ -12,16 +12,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .apis import mastodon as mastodon_api, misskey as misskey_api
 
+# Rate-limit delay between domain fetches (seconds). Set via env to be polite.
+DOMAIN_FETCH_DELAY = float(os.getenv("DOMAIN_FETCH_DELAY", "1.0"))
+
 def load_domains(path="trendy_domains.txt"):
     if not os.path.exists(path):
         print(f"[error] {path} not found. Create it with one domain per line.", file=sys.stderr)
         sys.exit(1)
+    seen = set()
     out = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             d = line.strip().lower()
-            if d and not d.startswith("#"):
+            if d and not d.startswith("#") and d not in seen:
+                seen.add(d)
                 out.append(d)
+    if len(seen) < len([l.strip().lower() for l in open(path) if l.strip() and not l.strip().startswith("#")]):
+        print(f"[info] removed duplicate domains from {path}")
     return out
 
 def guess_stack(domain):
@@ -63,6 +70,8 @@ def parse_selection_ranges(spec: str, max_index: int):
 def fetch_domain_tags(domain, limit):
     """Detect server type and fetch trending tags for a single domain."""
     try:
+        if DOMAIN_FETCH_DELAY > 0:
+            time.sleep(DOMAIN_FETCH_DELAY)
         print(f"[info] {domain}")
         stack = guess_stack(domain)
         if stack == "mastodon":
@@ -88,15 +97,28 @@ def main():
     domains = load_domains(args.domains_file)
     aggregate = defaultdict(int)
     per_domain = {}
+    failed_domains = []
 
     with ThreadPoolExecutor(max_workers=min(8, len(domains) or 1)) as exe:
-        futures = [exe.submit(fetch_domain_tags, d, args.limit_per_domain) for d in domains]
+        futures = {exe.submit(fetch_domain_tags, d, args.limit_per_domain): d for d in domains}
         for fut in as_completed(futures):
-            d, tags = fut.result()
+            domain_name = futures[fut]
+            try:
+                d, tags = fut.result()
+            except Exception as e:
+                print(f"[error] {domain_name}: unexpected failure: {e}")
+                failed_domains.append(domain_name)
+                per_domain[domain_name] = []
+                continue
             per_domain[d] = tags
             for name, score in tags:
                 norm = name.lstrip("#").lower()
                 aggregate[norm] += int(score)
+
+    if failed_domains:
+        print(f"\n[warn] {len(failed_domains)} domain(s) failed: {', '.join(failed_domains)}")
+    if not aggregate:
+        print("[warn] no trends collected from any domain")
 
     merged = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
 
@@ -105,8 +127,9 @@ def main():
     for i, (tag, score) in enumerate(merged[:100], 1):
         print(f"{i:2}. #{tag}  — score {score}")
 
-    # Selection step
+    # Selection step — deduplicate selected tags
     selected = []
+    seen_tags = set()
     if args.interactive and merged:
         max_index = len(merged)
         print("\nSelect tags by index ranges (e.g., 1-5,8,12). Press Enter to accept top N.")
@@ -114,11 +137,20 @@ def main():
         if user:
             idxs = parse_selection_ranges(user, max_index)
             for idx in idxs:
-                selected.append(merged[idx-1][0])
+                t = merged[idx-1][0]
+                if t not in seen_tags:
+                    seen_tags.add(t)
+                    selected.append(t)
         else:
-            selected = [t for t, _ in merged[:args.select]]
+            for t, _ in merged[:args.select]:
+                if t not in seen_tags:
+                    seen_tags.add(t)
+                    selected.append(t)
     else:
-        selected = [t for t, _ in merged[:args.select]]
+        for t, _ in merged[:args.select]:
+            if t not in seen_tags:
+                seen_tags.add(t)
+                selected.append(t)
 
     print("\n=== Selected tags ===")
     for i, tag in enumerate(selected, 1):

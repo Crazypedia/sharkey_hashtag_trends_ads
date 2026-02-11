@@ -40,18 +40,30 @@ def prompt_domains(path: str) -> list:
 
 
 def fetch_and_merge(domains, limit=40):
+    # Deduplicate domains
+    domains = list(dict.fromkeys(domains))
     aggregate = defaultdict(int)
     per_domain = {}
+    failed = []
     with ThreadPoolExecutor(max_workers=min(8, len(domains) or 1)) as exe:
-        futs = [exe.submit(fetch_domain_tags, d, limit) for d in domains]
+        futs = {exe.submit(fetch_domain_tags, d, limit): d for d in domains}
         for fut in as_completed(futs):
-            d, tags = fut.result()
+            domain_name = futs[fut]
+            try:
+                d, tags = fut.result()
+            except Exception as e:
+                print(f"[error] {domain_name}: {e}")
+                failed.append(domain_name)
+                per_domain[domain_name] = []
+                continue
             per_domain[d] = tags
             for name, score in tags:
                 norm = name.lstrip("#").lower()
                 if not norm or is_nsfw_tag(norm):
                     continue
                 aggregate[norm] += int(score)
+    if failed:
+        print(f"[warn] {len(failed)} domain(s) failed: {', '.join(failed)}")
     merged = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
     return merged, per_domain
 
@@ -94,10 +106,32 @@ def main():
         duration = 3
     os.environ["AD_DURATION_DAYS"] = str(duration)
 
+    stage_errors = []
+
     print("\n[stage] Uploading images…")
-    upload_main()
+    try:
+        upload_main()
+    except SystemExit:
+        print("[error] upload stage exited early — check logs above")
+        stage_errors.append("uploads")
+    except Exception as e:
+        print(f"[error] upload stage failed: {e}")
+        stage_errors.append("uploads")
+
     print("\n[stage] Creating ads…")
-    create_ad_main()
+    try:
+        create_ad_main()
+    except SystemExit:
+        print("[error] ad creation stage exited early — check logs above")
+        stage_errors.append("ad_create")
+    except Exception as e:
+        print(f"[error] ad creation stage failed: {e}")
+        stage_errors.append("ad_create")
+
+    if stage_errors:
+        print(f"\n[warn] pipeline completed with errors in: {', '.join(stage_errors)}")
+    else:
+        print("\n[done] pipeline completed successfully")
 
 
 if __name__ == "__main__":
