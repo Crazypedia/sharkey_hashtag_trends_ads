@@ -10,6 +10,9 @@ ads_*.json
 selected_tags.txt
 ads_dedupe_index.json
 
+# Logs
+logs/
+
 # OS
 .DS_Store
 Thumbs.db

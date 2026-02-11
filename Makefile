@@ -23,5 +23,8 @@ run-ads:
 	DRY_RUN?=0
 	DRY_RUN=$(DRY_RUN) $(PY) -m sharkey_ads.ad_stage_create_ad
 
+run-pipeline:
+	./run_pipeline.sh
+
 clean-ads:
 	$(PY) -m sharkey_ads.clean_ads_folder --yes
