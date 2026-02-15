@@ -21,6 +21,8 @@ STATUS_SCAN_LIMIT = int(os.getenv("STATUS_SCAN_LIMIT", "60"))
 USER_AGENT = os.getenv("USER_AGENT", "BubbleAdUploader/1.3 (+https://mypocketpals.online)")
 TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "25"))
 DEDUP_MODE = (os.getenv("DEDUP_MODE", "reuse") or "reuse").lower()  # reuse | rename
+AD_MAX_VARIANTS = int(os.getenv("AD_MAX_VARIANTS", "3"))         # max ads per tag
+AD_VARIANT_THRESHOLD = int(os.getenv("AD_VARIANT_THRESHOLD", "3"))  # min unique images to enable variants
 
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
@@ -292,75 +294,102 @@ def main():
             print(f"  [warn] no candidates found for #{tag}")
             continue
 
-        # consensus first, then popularity
-        chosen = sorted(posts.values(), key=lambda e: (e["appearances"], e["best_score"]), reverse=True)[0]
-        if chosen["appearances"] < 2:
-            chosen = max(posts.values(), key=lambda e: e["best_score"])
+        # Rank candidates: consensus first, then popularity
+        ranked = sorted(posts.values(),
+                        key=lambda e: (e["appearances"], e["best_score"]),
+                        reverse=True)
+        # If top candidate has no cross-domain consensus, re-rank by score
+        if ranked[0]["appearances"] < 2:
+            ranked = sorted(posts.values(),
+                            key=lambda e: e["best_score"], reverse=True)
 
-        img_url = chosen["image_url"]
-        origin = chosen["origin_domain"].replace("/", "")
+        # Deduplicate by image URL (keep highest-ranked version)
+        seen_urls = set()
+        deduped = []
+        for c in ranked:
+            u = c["image_url"]
+            if u not in seen_urls:
+                seen_urls.add(u)
+                deduped.append(c)
 
-        # download → hash → dedupe
-        try:
-            content, ctype, sha = download_image(img_url)
-        except requests.RequestException as e:
-            print(f"    [warn] download failed: {e}")
-            continue
+        # Enable multi-variant only when enough unique images exist
+        if len(deduped) >= AD_VARIANT_THRESHOLD:
+            chosen_list = deduped[:AD_MAX_VARIANTS]
+        else:
+            chosen_list = deduped[:1]
 
-        ext = guess_ext_from_bytes_or_url(ctype, img_url)
-        filename = f"{today}_{safe_tag}_{origin}{ext}"
+        is_multi = len(chosen_list) > 1
+        print(f"  [info] {len(posts)} candidate(s), {len(deduped)} unique image(s) "
+              f"→ selecting {len(chosen_list)} variant(s)")
 
-        # dedupe by hash
-        existing = idx["by_hash"].get(sha)
-        if existing:
-            file_id = existing["fileId"]
-            # Ensure it sits in our folder, and optionally rename
+        for vi, chosen in enumerate(chosen_list):
+            img_url = chosen["image_url"]
+            origin = chosen["origin_domain"].replace("/", "")
+
+            # download → hash → dedupe
             try:
-                if DEDUP_MODE == "rename":
-                    update_file(file_id, name=filename, folder_id=folder_id)
-                    current_name = filename
-                else:
-                    # reuse: ensure folder, keep original name
-                    update_file(file_id, folder_id=folder_id)
-                    current_name = existing.get("filename") or filename
-                print(f"    [reuse] matched existing file (sha={sha[:10]}…). Using {current_name}")
+                content, ctype, sha = download_image(img_url)
+            except requests.RequestException as e:
+                print(f"    [warn] variant {vi} download failed: {e}")
+                continue
+
+            ext = guess_ext_from_bytes_or_url(ctype, img_url)
+            if is_multi:
+                filename = f"{today}_{safe_tag}_v{vi}_{origin}{ext}"
+            else:
+                filename = f"{today}_{safe_tag}_{origin}{ext}"
+
+            # dedupe by hash
+            existing = idx["by_hash"].get(sha)
+            if existing:
+                file_id = existing["fileId"]
+                # Ensure it sits in our folder, and optionally rename
+                try:
+                    if DEDUP_MODE == "rename":
+                        update_file(file_id, name=filename, folder_id=folder_id)
+                        current_name = filename
+                    else:
+                        update_file(file_id, folder_id=folder_id)
+                        current_name = existing.get("filename") or filename
+                    print(f"    [reuse] v{vi} matched existing file (sha={sha[:10]}…). Using {current_name}")
+                    results.append({
+                        "tag": tag,
+                        "variant_rank": vi,
+                        "origin": origin,
+                        "image_source": img_url,
+                        "drive_file_id": file_id,
+                        "drive_url": existing.get("url"),
+                        "filename": current_name,
+                        "appearances": chosen["appearances"],
+                        "score": chosen["best_score"],
+                        "dedup": True
+                    })
+                    continue
+                except Exception as e:
+                    print(f"    [warn] reuse/update failed, will re-upload: {e}")
+
+            # new upload
+            try:
+                up = upload_bytes_to_drive(content, filename, folder_id, ctype)
+                file_id = up.get("id")
+                final_url = up.get("url") or f"{SHARKEY_BASE}/files/{file_id}"
+                print(f"    [ok] v{vi} uploaded -> {filename}")
+                idx["by_hash"][sha] = {"fileId": file_id, "filename": filename, "url": final_url}
                 results.append({
                     "tag": tag,
+                    "variant_rank": vi,
                     "origin": origin,
                     "image_source": img_url,
                     "drive_file_id": file_id,
-                    "drive_url": existing.get("url"),
-                    "filename": current_name,
+                    "drive_url": final_url,
+                    "filename": filename,
                     "appearances": chosen["appearances"],
                     "score": chosen["best_score"],
-                    "dedup": True
+                    "dedup": False
                 })
-                continue
             except Exception as e:
-                print(f"    [warn] reuse/update failed, will re-upload: {e}")
-
-        # new upload
-        try:
-            up = upload_bytes_to_drive(content, filename, folder_id, ctype)
-            file_id = up.get("id")
-            final_url = up.get("url") or f"{SHARKEY_BASE}/files/{file_id}"
-            print(f"    [ok] uploaded -> {filename}")
-            # index it
-            idx["by_hash"][sha] = {"fileId": file_id, "filename": filename, "url": final_url}
-            results.append({
-                "tag": tag,
-                "origin": origin,
-                "image_source": img_url,
-                "drive_file_id": file_id,
-                "drive_url": final_url,
-                "filename": filename,
-                "appearances": chosen["appearances"],
-                "score": chosen["best_score"],
-                "dedup": False
-            })
-        except Exception as e:
-            print(f"    [warn] upload failed: {e}")
-            continue
+                print(f"    [warn] variant {vi} upload failed: {e}")
+                continue
 
     # Save dedupe index once at the end
     save_index(idx)
