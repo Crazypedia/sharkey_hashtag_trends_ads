@@ -30,7 +30,8 @@ SESSION.headers.update({"User-Agent": USER_AGENT})
 SAFE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 INDEX_PATH = Path("ads_dedupe_index.json")
 MANIFEST_PATH = Path("ads_uploads_manifest.json")
-WEEKDAY_HASHTAGS_PATH = Path("weekday_hashtags.json")
+
+WEEKDAY_DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
 
 # ---------- helpers ----------
 def die(msg, code=1):
@@ -43,23 +44,19 @@ def read_lines(path):
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
             if ln.strip() and not ln.strip().startswith("#")]
 
-def load_weekday_hashtags(path=None):
-    """Load weekday_hashtags.json → {tag: day_name} mapping.
-    Returns empty dict if file is missing."""
-    p = Path(path) if path else WEEKDAY_HASHTAGS_PATH
-    if not p.exists():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+def load_weekday_hashtags():
+    """Read WEEKDAY_HASHTAGS_<DAY> env vars → {tag: day_name} mapping.
+    Example:  WEEKDAY_HASHTAGS_SATURDAY=caturday,catsofmastodon
+    Returns empty dict if no vars are set."""
     tag_to_day = {}
-    for day, tags in data.items():
-        day = day.strip().lower()
-        if not isinstance(tags, list):
+    for day in WEEKDAY_DAYS:
+        raw = os.getenv(f"WEEKDAY_HASHTAGS_{day.upper()}", "").strip()
+        if not raw:
             continue
-        for t in tags:
-            tag_to_day[t.lstrip("#").lower()] = day
+        for t in raw.split(","):
+            t = t.strip().lstrip("#").lower()
+            if t:
+                tag_to_day[t] = day
     return tag_to_day
 
 def load_index():
