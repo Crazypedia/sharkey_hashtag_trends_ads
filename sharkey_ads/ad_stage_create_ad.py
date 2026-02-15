@@ -1,6 +1,9 @@
 # ad_stage_create_ad.py
-# Create/update one Advertisement per selected tag using Drive images from ads_uploads_manifest.json.
+# Create/update Advertisements per selected tag using Drive images from ads_uploads_manifest.json.
+# - Supports multi-variant ads: tags with enough images get multiple concurrent ads
+#   with the ratio budget split evenly so they don't crowd out single-image tags.
 # - Handles schema quirks across Sharkey/Misskey forks (place, startsAt/expiresAt, dayOfWeek, ratio int, priority string)
+# - Automatically expires stale variant ads when a tag's image count drops.
 # - Supports DRY_RUN=1 to preview payloads without modifying the server.
 
 import os, sys, json
@@ -118,6 +121,8 @@ def to_iso8601(dt: datetime) -> str:
 def to_epoch_ms(dt: datetime) -> int:
     return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
+VARIANT_LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 def newest_per_tag(uploads_list):
     latest = {}
     for r in uploads_list:
@@ -132,6 +137,20 @@ def newest_per_tag(uploads_list):
         if (prev is None) or (d > prev["dt"]):
             latest[tag] = {**r, "dt": d}
     return latest
+
+def group_by_tag(uploads_list):
+    """Group uploads by tag, returning {tag: [uploads sorted by variant_rank]}.
+    Each tag may have multiple variants (images) from the upload stage."""
+    groups = {}
+    for r in uploads_list:
+        tag = (r.get("tag") or "").lstrip("#").lower()
+        if not tag:
+            continue
+        groups.setdefault(tag, []).append(r)
+    # Sort each group by variant_rank (upload stage assigns these)
+    for tag in groups:
+        groups[tag].sort(key=lambda r: r.get("variant_rank", 0))
+    return groups
 
 def find_existing_by_title(ads: list, title: str):
     for a in ads or []:
@@ -178,97 +197,131 @@ def main():
     start_key = schema["start_key"] or "startsAt"
     end_key   = schema["end_key"]   or "expiresAt"
 
-    uploads_by_tag = newest_per_tag(uploads)
-    created, updated = 0, 0
+    tag_groups = group_by_tag(uploads)
+    created, updated, stale_cleaned = 0, 0, 0
     now = datetime.utcnow()
     expires_dt = now + timedelta(days=AD_DURATION_DAYS)
+    active_titles = set()
 
-    for tag, r in uploads_by_tag.items():
-        title = f"{TITLE_PREFIX}{tag} — featured"
+    for tag, variants in tag_groups.items():
+        is_multi = len(variants) > 1
         url = f"{SHARKEY_BASE}/tags/{tag}"
 
-        # inverse popularity → float ratio, then integer scale for server
+        # Compute ratio budget for the whole tag
         ratio_f = build_ratio_inverse_float(merged_scores, tag) if schema["ratio"] else None
-        ratio_int = None
-        if ratio_f is not None:
-            scaled = ratio_f * AD_RATIO_SCALE
-            if scaled < 1: scaled = 1
-            if scaled > AD_RATIO_SCALE: scaled = AD_RATIO_SCALE
-            ratio_int = int(round(scaled))
 
+        # Per-tag overrides
         priority_val = AD_DEFAULT_PRIORITY
-
-        memo = " • ".join([
-            f"Auto {now.date().isoformat()}",
-            f"consensus={r.get('appearances', 1)}",
-            f"score={r.get('score', 0)}",
-            f"duration={AD_DURATION_DAYS}d"
-        ])
-
         ov = overrides.get(tag) if isinstance(overrides, dict) else None
         if ov:
             try: priority_val = int(ov.get("priority", priority_val))
             except Exception: pass
             url = ov.get("targetUrl", url)
 
-        base = {
-            "title": title,
-            "memo": memo,
-            "imageUrl": r.get("drive_url"),
-            "url": url,
-            "priority": str(priority_val),   # string per your instance
-            "place": schema["default_place"],
-        }
-        if schema["ratio"] and ratio_int is not None:
-            base["ratio"] = ratio_int       # integer per your instance
+        if is_multi:
+            print(f"[info] #{tag}: {len(variants)} variant(s), splitting ratio budget")
 
-        iso_dates = { start_key: to_iso8601(now),     end_key: to_iso8601(expires_dt) }
-        epoch_dates = { start_key: to_epoch_ms(now),  end_key: to_epoch_ms(expires_dt) }
+        for vi, r in enumerate(variants):
+            # --- Title: bare for single, labelled for multi ---
+            if is_multi:
+                label = VARIANT_LABELS[vi]
+                title = f"{TITLE_PREFIX}{tag} — featured ({label})"
+            else:
+                title = f"{TITLE_PREFIX}{tag} — featured"
+            active_titles.add(title)
 
-        existing = find_existing_by_title(existing_ads, title)
-        op_path = "admin/ad/update" if existing else "admin/ad/create"
+            # --- Split ratio across variants ---
+            ratio_int = None
+            if ratio_f is not None:
+                variant_ratio = ratio_f / len(variants)
+                scaled = variant_ratio * AD_RATIO_SCALE
+                scaled = max(1, min(AD_RATIO_SCALE, scaled))
+                ratio_int = int(round(scaled))
 
-        core = dict(base)
-        if existing:
-            core["id"] = existing.get("id")
+            # --- Memo ---
+            variant_note = f"variant={VARIANT_LABELS[vi]}/{len(variants)}" if is_multi else "single"
+            memo = " • ".join([
+                f"Auto {now.date().isoformat()}",
+                f"consensus={r.get('appearances', 1)}",
+                f"score={r.get('score', 0)}",
+                f"duration={AD_DURATION_DAYS}d",
+                variant_note
+            ])
 
-        success = False
-        last_err = None
+            base = {
+                "title": title,
+                "memo": memo,
+                "imageUrl": r.get("drive_url"),
+                "url": url,
+                "priority": str(priority_val),
+                "place": schema["default_place"],
+            }
+            if schema["ratio"] and ratio_int is not None:
+                base["ratio"] = ratio_int
 
-        # Try ISO-date attempts with several dayOfWeek encodings
-        for dv in dayofweek_candidates():
-            payload = dict(core); payload.update(iso_dates); payload["dayOfWeek"] = dv
-            ok, data, _ = send_payload(op_path, payload)
-            if ok:
-                success = True; break
-            last_err = data
-            if needs_epoch_retry(str(data)):
-                break
+            iso_dates = { start_key: to_iso8601(now),     end_key: to_iso8601(expires_dt) }
+            epoch_dates = { start_key: to_epoch_ms(now),  end_key: to_epoch_ms(expires_dt) }
 
-        # If still not ok, try epoch-ms attempts
-        if not success:
+            existing = find_existing_by_title(existing_ads, title)
+            op_path = "admin/ad/update" if existing else "admin/ad/create"
+
+            core = dict(base)
+            if existing:
+                core["id"] = existing.get("id")
+
+            success = False
+            last_err = None
+
+            # Try ISO-date attempts with several dayOfWeek encodings
             for dv in dayofweek_candidates():
-                payload = dict(core); payload.update(epoch_dates); payload["dayOfWeek"] = dv
+                payload = dict(core); payload.update(iso_dates); payload["dayOfWeek"] = dv
                 ok, data, _ = send_payload(op_path, payload)
                 if ok:
                     success = True; break
                 last_err = data
+                if needs_epoch_retry(str(data)):
+                    break
 
-        if not success:
-            die(f"{op_path} failed: {last_err}")
+            # If still not ok, try epoch-ms attempts
+            if not success:
+                for dv in dayofweek_candidates():
+                    payload = dict(core); payload.update(epoch_dates); payload["dayOfWeek"] = dv
+                    ok, data, _ = send_payload(op_path, payload)
+                    if ok:
+                        success = True; break
+                    last_err = data
 
-        if existing:
-            updated += 1
-            print(("[dry-run] " if DRY_RUN else "") + f"[update] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
-        else:
-            created += 1
-            print(("[dry-run] " if DRY_RUN else "") + f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+            if not success:
+                die(f"{op_path} failed: {last_err}")
+
+            if existing:
+                updated += 1
+                print(("[dry-run] " if DRY_RUN else "") + f"[update] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+            else:
+                created += 1
+                print(("[dry-run] " if DRY_RUN else "") + f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+
+    # --- Clean stale variant ads ---
+    # When a tag drops from multi-variant to fewer variants (or disappears),
+    # expire old ads that are no longer in the active set.
+    for a in existing_ads or []:
+        if not isinstance(a, dict):
+            continue
+        t = a.get("title", "")
+        if t.startswith(TITLE_PREFIX) and t not in active_titles:
+            aid = a.get("id")
+            if aid:
+                print(("[dry-run] " if DRY_RUN else "") + f"[cleanup] expiring stale ad: {t}")
+                expire_payload = {"id": aid, end_key: to_iso8601(now)}
+                send_payload("admin/ad/update", expire_payload)
+                stale_cleaned += 1
 
     Path("ads_created.json").write_text(
-        json.dumps({"created": created, "updated": updated}, ensure_ascii=False, indent=2),
+        json.dumps({"created": created, "updated": updated, "stale_cleaned": stale_cleaned},
+                   ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    print(f"\n[done] ads created={created}, updated={updated}. Wrote ads_created.json.")
+    print(f"\n[done] ads created={created}, updated={updated}, stale_cleaned={stale_cleaned}. Wrote ads_created.json.")
 
 if __name__ == "__main__":
     main()
