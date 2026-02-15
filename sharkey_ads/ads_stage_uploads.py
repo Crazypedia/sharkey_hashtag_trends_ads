@@ -30,6 +30,7 @@ SESSION.headers.update({"User-Agent": USER_AGENT})
 SAFE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 INDEX_PATH = Path("ads_dedupe_index.json")
 MANIFEST_PATH = Path("ads_uploads_manifest.json")
+WEEKDAY_HASHTAGS_PATH = Path("weekday_hashtags.json")
 
 # ---------- helpers ----------
 def die(msg, code=1):
@@ -41,6 +42,25 @@ def read_lines(path):
         die(f"{path} not found")
     return [ln.strip() for ln in p.read_text(encoding="utf-8").splitlines()
             if ln.strip() and not ln.strip().startswith("#")]
+
+def load_weekday_hashtags(path=None):
+    """Load weekday_hashtags.json → {tag: day_name} mapping.
+    Returns empty dict if file is missing."""
+    p = Path(path) if path else WEEKDAY_HASHTAGS_PATH
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    tag_to_day = {}
+    for day, tags in data.items():
+        day = day.strip().lower()
+        if not isinstance(tags, list):
+            continue
+        for t in tags:
+            tag_to_day[t.lstrip("#").lower()] = day
+    return tag_to_day
 
 def load_index():
     if INDEX_PATH.exists():
@@ -219,6 +239,13 @@ def main():
     if not tags: die("selected_tags.txt is empty")
     if not domains: die("trendy_domains.txt is empty")
 
+    # Load weekday hashtags and merge them in (they get processed the same way)
+    weekday_map = load_weekday_hashtags()
+    weekday_only_tags = [t for t in weekday_map if t not in tags]
+    if weekday_only_tags:
+        print(f"[info] adding {len(weekday_only_tags)} weekday hashtag(s): {', '.join('#' + t for t in weekday_only_tags)}")
+        tags.extend(weekday_only_tags)
+
     # Prove Drive works
     _ = mk_api("drive/folders", {})
 
@@ -352,7 +379,7 @@ def main():
                         update_file(file_id, folder_id=folder_id)
                         current_name = existing.get("filename") or filename
                     print(f"    [reuse] v{vi} matched existing file (sha={sha[:10]}…). Using {current_name}")
-                    results.append({
+                    entry = {
                         "tag": tag,
                         "variant_rank": vi,
                         "origin": origin,
@@ -363,7 +390,10 @@ def main():
                         "appearances": chosen["appearances"],
                         "score": chosen["best_score"],
                         "dedup": True
-                    })
+                    }
+                    if tag in weekday_map:
+                        entry["weekday"] = weekday_map[tag]
+                    results.append(entry)
                     continue
                 except Exception as e:
                     print(f"    [warn] reuse/update failed, will re-upload: {e}")
@@ -375,7 +405,7 @@ def main():
                 final_url = up.get("url") or f"{SHARKEY_BASE}/files/{file_id}"
                 print(f"    [ok] v{vi} uploaded -> {filename}")
                 idx["by_hash"][sha] = {"fileId": file_id, "filename": filename, "url": final_url}
-                results.append({
+                entry = {
                     "tag": tag,
                     "variant_rank": vi,
                     "origin": origin,
@@ -386,7 +416,10 @@ def main():
                     "appearances": chosen["appearances"],
                     "score": chosen["best_score"],
                     "dedup": False
-                })
+                }
+                if tag in weekday_map:
+                    entry["weekday"] = weekday_map[tag]
+                results.append(entry)
             except Exception as e:
                 print(f"    [warn] variant {vi} upload failed: {e}")
                 continue

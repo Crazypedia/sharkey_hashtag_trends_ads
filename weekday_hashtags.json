@@ -1,0 +1,9 @@
+{
+  "monday": ["motivationmonday", "mondaymood", "mondaymorning"],
+  "tuesday": ["transformationtuesday"],
+  "wednesday": ["wisdomwednesday", "humpday"],
+  "thursday": ["throwbackthursday", "tbt"],
+  "friday": ["followfriday", "ff", "friyay"],
+  "saturday": ["caturday"],
+  "sunday": ["selfcaresunday"]
+}

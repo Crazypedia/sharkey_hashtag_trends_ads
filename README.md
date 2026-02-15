@@ -132,6 +132,34 @@ Creates/updates one Advertisement per tag, linking to your local tag page. Adapt
 
 ---
 
+### Optional: `weekday_hashtags.json`
+
+Define hashtags that appear only on their designated day of the week. These are "always on" ads — they never expire and their images are refreshed each run, but their trending ratio and expiration are left untouched.
+
+Example:
+```json
+{
+  "monday": ["motivationmonday", "mondaymood"],
+  "friday": ["followfriday", "ff"],
+  "saturday": ["caturday"]
+}
+```
+
+How it works:
+- The upload stage fetches images for weekday tags just like trending tags.
+- The ad creator uses a separate title prefix (`[WeekdayAd] #`) so they don't conflict with trending ads.
+- `dayOfWeek` is set to only the designated day (not all days).
+- No expiration is set (far‑future date on creation; updates only refresh the image).
+- A fixed ratio is used instead of trending‑based inverse popularity.
+- Weekday ads that are removed from the config are expired during the stale‑cleanup pass.
+
+Environment overrides (`.env`):
+- `WEEKDAY_TITLE_PREFIX` — default `[WeekdayAd] #`
+- `WEEKDAY_AD_RATIO` — fixed ratio integer (default `50`)
+- `WEEKDAY_AD_PRIORITY` — default priority (default `50`)
+
+---
+
 ### Optional: `ad_overrides.json`
 
 Per‑tag tweaks without touching code. If present in the project root, the ad creator will read it.

@@ -28,6 +28,30 @@ AD_DURATION_DAYS = int(os.getenv("AD_DURATION_DAYS", "7"))
 TITLE_PREFIX = os.getenv("AD_TITLE_PREFIX", "[TagAd] #")
 AD_PLACE_ENV = os.getenv("AD_PLACE", "").strip()          # e.g., "horizontal-big", "timeline"
 
+# Weekday "always on" ads
+WEEKDAY_TITLE_PREFIX = os.getenv("WEEKDAY_TITLE_PREFIX", "[WeekdayAd] #")
+WEEKDAY_AD_RATIO = int(os.getenv("WEEKDAY_AD_RATIO", "50"))
+WEEKDAY_AD_PRIORITY = int(os.getenv("WEEKDAY_AD_PRIORITY", "50"))
+
+# Bitmask per day (Sunday = bit 0)
+DAY_BITMASK = {
+    "sunday":    1,   # 2^0
+    "monday":    2,   # 2^1
+    "tuesday":   4,   # 2^2
+    "wednesday": 8,   # 2^3
+    "thursday":  16,  # 2^4
+    "friday":    32,  # 2^5
+    "saturday":  64,  # 2^6
+}
+DAY_INDEX_0 = {  # 0-based (Sunday = 0)
+    "sunday": 0, "monday": 1, "tuesday": 2, "wednesday": 3,
+    "thursday": 4, "friday": 5, "saturday": 6,
+}
+DAY_INDEX_1 = {  # 1-based (Sunday = 1)
+    "sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
+    "thursday": 5, "friday": 6, "saturday": 7,
+}
+
 # New: dry-run support
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 
@@ -172,6 +196,16 @@ def dayofweek_candidates():
         ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"],
     ]
 
+def weekday_dayofweek_candidates(day_name: str):
+    """Day-of-week candidates restricted to a single named day."""
+    day = day_name.strip().lower()
+    return [
+        DAY_BITMASK[day],             # integer bitmask for one day
+        [DAY_INDEX_0[day]],           # array [0..6]
+        [DAY_INDEX_1[day]],           # array [1..7]
+        [day],                        # string array
+    ]
+
 # ===== Main =====
 def main():
     manifest = load_json_file(MANIFEST_PATH)
@@ -197,12 +231,19 @@ def main():
     start_key = schema["start_key"] or "startsAt"
     end_key   = schema["end_key"]   or "expiresAt"
 
-    tag_groups = group_by_tag(uploads)
+    # Separate trending uploads from weekday "always on" uploads
+    trending_uploads = [r for r in uploads if not r.get("weekday")]
+    weekday_uploads  = [r for r in uploads if r.get("weekday")]
+
+    tag_groups = group_by_tag(trending_uploads)
+    weekday_groups = group_by_tag(weekday_uploads)
+
     created, updated, stale_cleaned = 0, 0, 0
     now = datetime.utcnow()
     expires_dt = now + timedelta(days=AD_DURATION_DAYS)
     active_titles = set()
 
+    # ===== Trending ads (normal behaviour) =====
     for tag, variants in tag_groups.items():
         is_multi = len(variants) > 1
         url = f"{SHARKEY_BASE}/tags/{tag}"
@@ -301,14 +342,119 @@ def main():
                 created += 1
                 print(("[dry-run] " if DRY_RUN else "") + f"[create] {title} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
 
-    # --- Clean stale variant ads ---
-    # When a tag drops from multi-variant to fewer variants (or disappears),
-    # expire old ads that are no longer in the active set.
+    # ===== Weekday "always on" ads =====
+    # These get: day-specific dayOfWeek, no expiration, fixed ratio, image refresh only.
+    weekday_created, weekday_updated = 0, 0
+    # Use a far-future expiry (10 years) since weekday ads should never expire.
+    far_future = now + timedelta(days=3650)
+
+    for tag, variants in weekday_groups.items():
+        day_name = variants[0].get("weekday", "").lower()
+        if day_name not in DAY_BITMASK:
+            print(f"[warn] weekday tag #{tag} has unknown day '{day_name}', skipping")
+            continue
+
+        url = f"{SHARKEY_BASE}/tags/{tag}"
+
+        # Per-tag overrides (same mechanism as trending)
+        priority_val = WEEKDAY_AD_PRIORITY
+        ov = overrides.get(tag) if isinstance(overrides, dict) else None
+        if ov:
+            try: priority_val = int(ov.get("priority", priority_val))
+            except Exception: pass
+            url = ov.get("targetUrl", url)
+
+        # Take only the first variant for weekday ads (single image per tag)
+        r = variants[0]
+        title = f"{WEEKDAY_TITLE_PREFIX}{tag} — {day_name}"
+        active_titles.add(title)
+
+        memo = " • ".join([
+            f"Auto {now.date().isoformat()}",
+            f"weekday={day_name}",
+            "always-on",
+        ])
+
+        base = {
+            "title": title,
+            "memo": memo,
+            "imageUrl": r.get("drive_url"),
+            "url": url,
+            "priority": str(priority_val),
+            "place": schema["default_place"],
+        }
+        if schema["ratio"]:
+            base["ratio"] = WEEKDAY_AD_RATIO
+
+        # Weekday ads: start now, never expire (far future).
+        # Only update the image and start date — preserve the always-on nature.
+        iso_dates  = { start_key: to_iso8601(now), end_key: to_iso8601(far_future) }
+        epoch_dates = { start_key: to_epoch_ms(now), end_key: to_epoch_ms(far_future) }
+
+        existing = find_existing_by_title(existing_ads, title)
+        op_path = "admin/ad/update" if existing else "admin/ad/create"
+
+        core = dict(base)
+        if existing:
+            core["id"] = existing.get("id")
+            # When updating an existing weekday ad, only refresh the image —
+            # do not overwrite the expiry or ratio that may have been tuned.
+            core.pop("ratio", None)
+
+        success = False
+        last_err = None
+
+        # Try ISO-date attempts with day-specific dayOfWeek
+        dow_candidates = weekday_dayofweek_candidates(day_name)
+        for dv in dow_candidates:
+            payload = dict(core)
+            payload.update(iso_dates)
+            # On updates, don't send new dates (preserve always-on window)
+            if existing:
+                payload.pop(start_key, None)
+                payload.pop(end_key, None)
+            payload["dayOfWeek"] = dv
+            ok, data, _ = send_payload(op_path, payload)
+            if ok:
+                success = True; break
+            last_err = data
+            if needs_epoch_retry(str(data)):
+                break
+
+        # Epoch-ms fallback
+        if not success:
+            for dv in dow_candidates:
+                payload = dict(core)
+                payload.update(epoch_dates)
+                if existing:
+                    payload.pop(start_key, None)
+                    payload.pop(end_key, None)
+                payload["dayOfWeek"] = dv
+                ok, data, _ = send_payload(op_path, payload)
+                if ok:
+                    success = True; break
+                last_err = data
+
+        if not success:
+            print(f"[warn] weekday ad #{tag} ({day_name}) failed: {last_err}")
+            continue
+
+        prefix = "[dry-run] " if DRY_RUN else ""
+        if existing:
+            weekday_updated += 1
+            print(f"{prefix}[weekday-update] {title} day={day_name} place={base['place']} priority={base['priority']}")
+        else:
+            weekday_created += 1
+            print(f"{prefix}[weekday-create] {title} day={day_name} place={base['place']} ratio={base.get('ratio')} priority={base['priority']}")
+
+    # ===== Clean stale ads =====
+    # Expire old trending or weekday ads that are no longer in the active set.
+    managed_prefixes = (TITLE_PREFIX, WEEKDAY_TITLE_PREFIX)
     for a in existing_ads or []:
         if not isinstance(a, dict):
             continue
         t = a.get("title", "")
-        if t.startswith(TITLE_PREFIX) and t not in active_titles:
+        if any(t.startswith(p) for p in managed_prefixes) and t not in active_titles:
             aid = a.get("id")
             if aid:
                 print(("[dry-run] " if DRY_RUN else "") + f"[cleanup] expiring stale ad: {t}")
@@ -316,12 +462,19 @@ def main():
                 send_payload("admin/ad/update", expire_payload)
                 stale_cleaned += 1
 
+    total_created = created + weekday_created
+    total_updated = updated + weekday_updated
     Path("ads_created.json").write_text(
-        json.dumps({"created": created, "updated": updated, "stale_cleaned": stale_cleaned},
-                   ensure_ascii=False, indent=2),
+        json.dumps({
+            "created": created, "updated": updated,
+            "weekday_created": weekday_created, "weekday_updated": weekday_updated,
+            "stale_cleaned": stale_cleaned
+        }, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
-    print(f"\n[done] ads created={created}, updated={updated}, stale_cleaned={stale_cleaned}. Wrote ads_created.json.")
+    print(f"\n[done] trending: created={created} updated={updated} | "
+          f"weekday: created={weekday_created} updated={weekday_updated} | "
+          f"stale_cleaned={stale_cleaned}. Wrote ads_created.json.")
 
 if __name__ == "__main__":
     main()

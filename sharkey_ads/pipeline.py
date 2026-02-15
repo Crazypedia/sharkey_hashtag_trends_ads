@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from .bubble_trends import load_domains, fetch_domain_tags
-from .ads_stage_uploads import main as upload_main, is_nsfw_tag
+from .ads_stage_uploads import main as upload_main, is_nsfw_tag, load_weekday_hashtags
 from .ad_stage_create_ad import main as create_ad_main
 
 
@@ -96,6 +96,18 @@ def main():
     except ValueError:
         duration = 3
     os.environ["AD_DURATION_DAYS"] = str(duration)
+
+    # Show weekday hashtag info if configured
+    weekday_map = load_weekday_hashtags()
+    if weekday_map:
+        days_summary = {}
+        for tag, day in weekday_map.items():
+            days_summary.setdefault(day, []).append(f"#{tag}")
+        print("\n=== Weekday 'always on' hashtags ===")
+        for day in ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"]:
+            if day in days_summary:
+                print(f"  {day.capitalize()}: {', '.join(days_summary[day])}")
+        print("(These will be included automatically alongside trending tags.)")
 
     print("\n[stage] Uploading images…")
     upload_main()
