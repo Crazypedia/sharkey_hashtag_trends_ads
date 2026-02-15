@@ -75,7 +75,8 @@ def fetch_domain_tags(domain, limit):
     except Exception as e:
         print(f"[error] {domain}: {e}")
         tags = []
-    return domain, tags
+        stack = "unknown"
+    return domain, tags, stack
 
 def main():
     ap = argparse.ArgumentParser(description="Merge trending tags across bubble servers and select a subset.")
@@ -89,11 +90,13 @@ def main():
     aggregate = defaultdict(int)
     per_domain = {}
 
+    domain_stacks = {}
     with ThreadPoolExecutor(max_workers=min(8, len(domains) or 1)) as exe:
         futures = [exe.submit(fetch_domain_tags, d, args.limit_per_domain) for d in domains]
         for fut in as_completed(futures):
-            d, tags = fut.result()
+            d, tags, stack = fut.result()
             per_domain[d] = tags
+            domain_stacks[d] = stack
             for name, score in tags:
                 norm = name.lstrip("#").lower()
                 aggregate[norm] += int(score)
@@ -128,6 +131,7 @@ def main():
     out = {
         "generated_at": int(time.time()),
         "domains": domains,
+        "domain_stacks": domain_stacks,
         "per_domain": {d: [{"tag": t, "score": s} for t, s in per_domain.get(d, [])] for d in domains},
         "merged": [{"tag": t, "score": s} for t, s in merged],
         "selected": [{"tag": t} for t in selected]

@@ -42,18 +42,20 @@ def prompt_domains(path: str) -> list:
 def fetch_and_merge(domains, limit=40):
     aggregate = defaultdict(int)
     per_domain = {}
+    domain_stacks = {}
     with ThreadPoolExecutor(max_workers=min(8, len(domains) or 1)) as exe:
         futs = [exe.submit(fetch_domain_tags, d, limit) for d in domains]
         for fut in as_completed(futs):
-            d, tags = fut.result()
+            d, tags, stack = fut.result()
             per_domain[d] = tags
+            domain_stacks[d] = stack
             for name, score in tags:
                 norm = name.lstrip("#").lower()
                 if not norm or is_nsfw_tag(norm):
                     continue
                 aggregate[norm] += int(score)
     merged = sorted(aggregate.items(), key=lambda kv: kv[1], reverse=True)
-    return merged, per_domain
+    return merged, per_domain, domain_stacks
 
 
 def main():
@@ -61,7 +63,7 @@ def main():
     domains_path = base / "trendy_domains.txt"
     domains = prompt_domains(str(domains_path))
 
-    merged, per_domain = fetch_and_merge(domains)
+    merged, per_domain, domain_stacks = fetch_and_merge(domains)
     print("\n=== Bubble-wide trending (merged) ===")
     for i, (tag, score) in enumerate(merged[:100], 1):
         print(f"{i:2}. #{tag}  — score {score}")
@@ -77,6 +79,7 @@ def main():
     bubble = {
         "generated_at": int(time.time()),
         "domains": domains,
+        "domain_stacks": domain_stacks,
         "per_domain": {
             d: [{"tag": t, "score": s} for t, s in per_domain.get(d, [])]
             for d in domains

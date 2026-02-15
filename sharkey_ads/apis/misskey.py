@@ -1,6 +1,7 @@
 from mastodon import Mastodon
 
 TIMEOUT = 15
+PROBE_TIMEOUT = 5
 USER_AGENT = "BubbleTrends/1.1 (+https://mypocketpals.online)"
 
 def _client(domain):
@@ -17,6 +18,19 @@ def _api(client, method, endpoint, params=None, json=False):
                                              use_json=json)
     except Exception:
         return None
+
+def probe(domain):
+    """Quick check whether domain speaks Misskey API. Uses short timeout."""
+    try:
+        c = Mastodon(api_base_url=f"https://{domain}",
+                     request_timeout=PROBE_TIMEOUT,
+                     user_agent=USER_AGENT)
+        data = _api(c, "GET", "/api/hashtags/trend") or \
+               _api(c, "POST", "/api/hashtags/trend",
+                    params={"limit": 1}, json=True)
+        return bool(data)
+    except Exception:
+        return False
 
 def get_trends(domain, limit=20):
     """Return [(tag, score), ...] for Misskey/Sharkey instance."""
