@@ -2,6 +2,7 @@ from mastodon import Mastodon
 from urllib.parse import quote
 
 TIMEOUT = 15
+PROBE_TIMEOUT = 5
 USER_AGENT = "BubbleTrends/1.1 (+https://mypocketpals.online)"
 
 def _client(domain):
@@ -9,6 +10,17 @@ def _client(domain):
     return Mastodon(api_base_url=f"https://{domain}",
                     request_timeout=TIMEOUT,
                     user_agent=USER_AGENT)
+
+def probe(domain):
+    """Quick check whether domain speaks Mastodon API. Uses short timeout."""
+    try:
+        c = Mastodon(api_base_url=f"https://{domain}",
+                     request_timeout=PROBE_TIMEOUT,
+                     user_agent=USER_AGENT)
+        data = c.trending_tags(limit=1)
+        return bool(data)
+    except Exception:
+        return False
 
 def get_trends(domain, limit=20):
     """Return [(tag, score), ...] for Mastodon instance."""

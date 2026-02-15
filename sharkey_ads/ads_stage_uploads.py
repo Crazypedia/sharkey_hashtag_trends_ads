@@ -4,6 +4,7 @@ from datetime import date
 from urllib.parse import urlparse
 from pathlib import Path
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from dotenv import load_dotenv
@@ -104,12 +105,40 @@ def guess_ext_from_bytes_or_url(content_type, url):
     return ".jpg"
 
 # ---------- fetch from bubble servers ----------
+DOMAIN_SCAN_WORKERS = int(os.getenv("DOMAIN_SCAN_WORKERS", "6"))
+
 def detect_stack(domain):
-    if mastodon_api.get_trends(domain, limit=1):
+    """Detect API stack using fast probe timeout."""
+    if mastodon_api.probe(domain):
         return "mastodon"
-    if misskey_api.get_trends(domain, limit=1):
+    if misskey_api.probe(domain):
         return "misskey"
     return "unknown"
+
+def detect_stacks_cached(domains):
+    """Detect stack for all domains in parallel, return {domain: stack} dict.
+    Also tries to load cached results from bubble_trends.json."""
+    cache = {}
+    # Try loading stack info saved by bubble_trends stage
+    bt_path = Path("bubble_trends.json")
+    if bt_path.exists():
+        try:
+            bt = json.loads(bt_path.read_text(encoding="utf-8"))
+            for d, stack in (bt.get("domain_stacks") or {}).items():
+                cache[d] = stack
+        except Exception:
+            pass
+
+    # Detect any domains not already cached
+    missing = [d for d in domains if d not in cache]
+    if missing:
+        print(f"[info] probing {len(missing)} domain(s) for API compatibility …")
+        with ThreadPoolExecutor(max_workers=min(DOMAIN_SCAN_WORKERS, len(missing))) as exe:
+            futs = {exe.submit(detect_stack, d): d for d in missing}
+            for fut in as_completed(futs):
+                d = futs[fut]
+                cache[d] = fut.result()
+    return cache
 
 # ---------- consensus + popularity aggregation ----------
 def masto_status_key(s, domain):
@@ -196,51 +225,68 @@ def main():
     idx = load_index()
     results = []
 
+    # Detect stacks once upfront (parallel, fast timeout, cached from bubble_trends)
+    stacks = detect_stacks_cached(domains)
+    compatible = [d for d in domains if stacks.get(d, "unknown") != "unknown"]
+    skipped = [d for d in domains if stacks.get(d, "unknown") == "unknown"]
+    if skipped:
+        print(f"[info] skipping {len(skipped)} incompatible domain(s): {', '.join(skipped)}")
+    for d in compatible:
+        print(f"[info] {d} -> {stacks[d]}")
+
+    def _scan_domain_for_tag(domain, tag):
+        """Scan a single domain for posts matching tag. Returns list of (key, entry) tuples."""
+        stack = stacks[domain]
+        hits = []
+        if stack == "mastodon":
+            for s in mastodon_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                if not s or not is_safe_masto(s):
+                    continue
+                img, _alt = mastodon_api.pick_image(s)
+                if not img:
+                    continue
+                key = masto_status_key(s, domain)
+                score = masto_score(s)
+                origin = urlparse(s.get("url") or "").netloc or domain
+                hits.append((key, score, img, origin))
+        elif stack == "misskey":
+            for n in misskey_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
+                if not n or not is_safe_misskey(n):
+                    continue
+                img, _alt = misskey_api.pick_image(n)
+                if not img:
+                    continue
+                key = misskey_note_key(n, domain)
+                score = misskey_score(n)
+                origin = urlparse(n.get("url") or "").netloc or domain
+                hits.append((key, score, img, origin))
+        return hits
+
     for tag in tags:
         print(f"\n[tag] #{tag}")
         safe_tag = sanitize_tag_for_filename(tag)
 
-        # collect candidates across servers
+        # Scan compatible domains in parallel
         posts = {}  # key -> {appearances, best_score, image_url, origin_domain}
-        for domain in domains:
-            stack = detect_stack(domain)
-            print(f"  - probing {domain} ({stack}) …")
-            if stack == "mastodon":
-                for s in mastodon_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not s or not is_safe_masto(s):
-                        continue
-                    img, _alt = mastodon_api.pick_image(s)
-                    if not img:
-                        continue
-                    key = masto_status_key(s, domain)
-                    score = masto_score(s)
-                    origin = urlparse(s.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
+        with ThreadPoolExecutor(max_workers=min(DOMAIN_SCAN_WORKERS, len(compatible) or 1)) as exe:
+            futs = {exe.submit(_scan_domain_for_tag, d, tag): d for d in compatible}
+            for fut in as_completed(futs):
+                d = futs[fut]
+                try:
+                    hits = fut.result()
+                except Exception as e:
+                    print(f"  - {d}: error: {e}")
+                    continue
+                print(f"  - {d} ({stacks[d]}): {len(hits)} candidate(s)")
+                for key, score, img, origin in hits:
+                    e = posts.get(key, {"appearances": 0, "best_score": -1,
+                                        "image_url": img, "origin_domain": origin})
                     e["appearances"] += 1
                     if score > e["best_score"]:
                         e["best_score"] = score
                         e["image_url"] = img
                         e["origin_domain"] = origin
                     posts[key] = e
-            elif stack == "misskey":
-                for n in misskey_api.tag_timeline(domain, tag, limit=STATUS_SCAN_LIMIT):
-                    if not n or not is_safe_misskey(n):
-                        continue
-                    img, _alt = misskey_api.pick_image(n)
-                    if not img:
-                        continue
-                    key = misskey_note_key(n, domain)
-                    score = misskey_score(n)
-                    origin = urlparse(n.get("url") or "").netloc or domain
-                    e = posts.get(key, {"appearances": 0, "best_score": -1, "image_url": img, "origin_domain": origin})
-                    e["appearances"] += 1
-                    if score > e["best_score"]:
-                        e["best_score"] = score
-                        e["image_url"] = img
-                        e["origin_domain"] = origin
-                    posts[key] = e
-            else:
-                print(f"    [skip] unknown stack")
 
         if not posts:
             print(f"  [warn] no candidates found for #{tag}")
@@ -312,10 +358,12 @@ def main():
                 "score": chosen["best_score"],
                 "dedup": False
             })
-            save_index(idx)
         except Exception as e:
             print(f"    [warn] upload failed: {e}")
             continue
+
+    # Save dedupe index once at the end
+    save_index(idx)
 
     MANIFEST_PATH.write_text(
         json.dumps({"generated_at": int(__import__('time').time()), "results": results}, ensure_ascii=False, indent=2),
